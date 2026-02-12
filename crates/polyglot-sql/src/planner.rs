@@ -3,7 +3,6 @@
 //! This module provides functionality to convert SQL AST into an execution plan
 //! represented as a DAG (Directed Acyclic Graph) of steps.
 //!
-//! Reference: `external-projects/sqlglot/sqlglot/planner.py`
 
 use crate::expressions::{Expression, JoinKind};
 use std::collections::{HashMap, HashSet};

@@ -4,7 +4,6 @@
 //! building a graph of how columns flow from source tables to the result set.
 //! Supports UNION/INTERSECT/EXCEPT, CTEs, derived tables, subqueries, and star expansion.
 //!
-//! Reference: `external-projects/sqlglot/sqlglot/lineage.py`
 
 use crate::dialects::DialectType;
 use crate::expressions::Expression;

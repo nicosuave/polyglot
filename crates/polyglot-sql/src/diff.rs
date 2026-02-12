@@ -4,7 +4,6 @@
 //! a list of differences (edit script) between them, using the ChangeDistiller
 //! algorithm with Dice coefficient matching.
 //!
-//! Reference: `external-projects/sqlglot/sqlglot/diff.py`
 
 use crate::dialects::DialectType;
 use crate::expressions::Expression;
