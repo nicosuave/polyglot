@@ -99,11 +99,9 @@ polyglot/
 │   └── polyglot-sql-wasm/          # WASM bindings
 ├── packages/
 │   └── sdk/                    # TypeScript SDK (@polyglot-sql/sdk on npm)
-├── tools/
-│   ├── sqlglot-compare/        # Test extraction & comparison tool
-│   └── bench-compare/          # Performance benchmarks
-└── external-projects/
-    └── sqlglot/                # Reference Python implementation
+└── tools/
+    ├── sqlglot-compare/        # Test extraction & comparison tool
+    └── bench-compare/          # Performance benchmarks
 ```
 
 ## Building from Source
