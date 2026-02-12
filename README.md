@@ -2,7 +2,9 @@
 
 WASM-powered SQL transpiler for 32+ dialects, inspired by Python's [sqlglot](https://github.com/tobymao/sqlglot).
 
-Polyglot parses, generates, transpiles, and formats SQL across 32+ database dialects. It ships as a Rust crate ([`polyglot-sql`](crates/polyglot-sql/)) and a TypeScript/WASM SDK ([`@polyglot-sql/sdk`](packages/sdk/) on npm).
+Polyglot parses, generates, transpiles, and formats SQL across 32+ database dialects. It ships as a Rust crate ([`polyglot-sql`](https://crates.io/crates/polyglot-sql/)) and a TypeScript/WASM SDK ([`@polyglot-sql/sdk`](https://www.npmjs.com/package/@polyglot-sql/sdk) on npm).
+
+There's also a [playground](https://polyglot-playground.gh.tobilg.com/) where you can try it out in the browser, and the [TypeScript API Docs](https://polyglot.gh.tobilg.com/).
 
 ## Features
 
