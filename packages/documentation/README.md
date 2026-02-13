@@ -1,12 +1,12 @@
 # Polyglot SQL
 
-Rust/WASM-powered SQL transpiler for TypeScript. Parse, generate, transpile, format, and build SQL across 32 database dialects.
+Rust/Wasm-powered SQL transpiler for TypeScript. Parse, generate, transpile, format, and build SQL across 32 database dialects.
 
 ## Packages
 
 | Package | Description |
 |---------|-------------|
-| [@polyglot-sql/sdk](https://www.npmjs.com/package/@polyglot-sql/sdk) | TypeScript SDK with WASM-powered SQL transpilation |
+| [@polyglot-sql/sdk](https://www.npmjs.com/package/@polyglot-sql/sdk) | TypeScript SDK with Wasm-powered SQL transpilation |
 
 ## Quick Start
 

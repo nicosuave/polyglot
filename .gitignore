@@ -67,5 +67,7 @@ crates/polyglot-sql-wasm/pkg-node/
 # Node.js
 node_modules/
 dist/
+.vite/
+.wrangler/
 packages/sdk/coverage/
 

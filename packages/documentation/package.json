@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "typedoc",
+    "build": "typedoc && node postbuild.mjs",
     "preview": "npx serve dist",
     "deploy": "pnpm run build && wrangler pages deploy"
   },
