@@ -1,0 +1,16 @@
+{
+  "name": "@polyglot-sql/example-typescript",
+  "version": "0.1.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "pnpm tsx src/transpile.ts"
+  },
+  "dependencies": {
+    "@polyglot-sql/sdk": "latest"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

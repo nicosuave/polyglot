@@ -4,6 +4,9 @@ members = [
     "crates/polyglot-sql",
     "crates/polyglot-sql-wasm",
 ]
+exclude = [
+    "examples/rust",
+]
 
 [workspace.package]
 version = "0.1.2"
