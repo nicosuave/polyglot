@@ -16,6 +16,7 @@ import type {
   WasmSelectBuilder as WasmSelectBuilderType,
   WasmSetOpBuilder as WasmSetOpBuilderType,
   WasmUpdateBuilder as WasmUpdateBuilderType,
+  WasmWindowDefBuilder as WasmWindowDefBuilderType,
 } from '../wasm/polyglot_sql_wasm.js';
 
 import {
@@ -27,6 +28,7 @@ import {
   WasmMergeBuilder as WasmMergeBuilderClass,
   WasmSelectBuilder as WasmSelectBuilderClass,
   WasmUpdateBuilder as WasmUpdateBuilderClass,
+  WasmWindowDefBuilder as WasmWindowDefBuilderClass,
   wasm_alias,
   wasm_and,
   wasm_boolean,
@@ -40,7 +42,10 @@ import {
   wasm_or,
   wasm_sql_expr,
   wasm_star,
+  wasm_subquery,
   wasm_table,
+  wasm_count_distinct,
+  wasm_extract,
 } from '../wasm/polyglot_sql_wasm.js';
 
 // ============================================================================
@@ -225,6 +230,49 @@ export class Expr {
 }
 
 // ============================================================================
+// WindowDefBuilder
+// ============================================================================
+
+/**
+ * Builder for named WINDOW clause definitions.
+ *
+ * Used with `SelectBuilder.window()` to define reusable window specifications.
+ *
+ * @example
+ * ```typescript
+ * const w = new WindowDefBuilder()
+ *   .partitionBy('dept')
+ *   .orderBy(col('salary').desc());
+ * const sql = select('id').from('t').window('w', w).toSql();
+ * ```
+ */
+export class WindowDefBuilder {
+  /** @internal WASM handle */
+  _w: WasmWindowDefBuilderType;
+
+  constructor() {
+    this._w = new WasmWindowDefBuilderClass();
+  }
+
+  /** Set the PARTITION BY expressions. */
+  partitionBy(...exprs: ExprInput[]): this {
+    this._w.partition_by(toWasmArray(exprs));
+    return this;
+  }
+
+  /** Set the ORDER BY expressions. */
+  orderBy(...exprs: ExprInput[]): this {
+    this._w.order_by(toWasmArray(exprs));
+    return this;
+  }
+
+  /** Free the underlying WASM handle. */
+  free(): void {
+    this._w.free();
+  }
+}
+
+// ============================================================================
 // Expression helper functions
 // ============================================================================
 
@@ -288,6 +336,20 @@ export function alias(expr: ExprInput, name: string): Expr {
   return new Expr(wasm_alias(toWasm(expr), name));
 }
 
+/**
+ * Wrap a SelectBuilder as a named subquery for use in FROM or JOIN clauses.
+ * Note: this consumes the SelectBuilder.
+ *
+ * @example
+ * ```typescript
+ * const inner = select('id', 'name').from('users');
+ * const sql = select('sub.id').from(subquery(inner, 'sub')).toSql();
+ * ```
+ */
+export function subquery(query: SelectBuilder, alias: string): Expr {
+  return new Expr(wasm_subquery(query._w, alias));
+}
+
 // Variadic logical operators
 
 /** Chain multiple conditions with AND. */
@@ -328,15 +390,7 @@ export function count(expr?: ExprInput): Expr {
   return expr !== undefined ? func('COUNT', expr) : func('COUNT', star());
 }
 export function countDistinct(expr: ExprInput): Expr {
-  // COUNT(DISTINCT x) needs to be created via sqlExpr since the builder doesn't
-  // directly support DISTINCT in function args
-  const inner =
-    expr instanceof Expr
-      ? expr.toSql()
-      : typeof expr === 'string'
-        ? expr
-        : String(expr);
-  return sqlExpr(`COUNT(DISTINCT ${inner})`);
+  return new Expr(wasm_count_distinct(toWasm(expr)));
 }
 export function sum(expr: ExprInput): Expr {
   return func('SUM', expr);
@@ -455,13 +509,7 @@ export function currentTimestamp(): Expr {
   return func('CURRENT_TIMESTAMP');
 }
 export function extract(unit: string, from: ExprInput): Expr {
-  const fromSql =
-    from instanceof Expr
-      ? from.toSql()
-      : typeof from === 'string'
-        ? from
-        : String(from);
-  return sqlExpr(`EXTRACT(${unit} FROM ${fromSql})`);
+  return new Expr(wasm_extract(unit, toWasm(from)));
 }
 
 // -- Window functions --
@@ -591,6 +639,46 @@ export class SelectBuilder {
   qualify(condition: ExprInput): this {
     this._w.qualify(toWasm(condition));
     return this;
+  }
+
+  /** Set the SORT BY clause (Hive/Spark — sorts within each partition). */
+  sortBy(...exprs: ExprInput[]): this {
+    this._w.sort_by_exprs(toWasmArray(exprs));
+    return this;
+  }
+
+  /** Add a named WINDOW clause definition. */
+  window(name: string, def: WindowDefBuilder): this {
+    this._w.window(name, def._w);
+    return this;
+  }
+
+  /** Add a LATERAL VIEW clause (Hive/Spark UDTF expansion). */
+  lateral(funcExpr: Expr, tableAlias: string, colAliases: string[]): this {
+    this._w.lateral_view(funcExpr._w, tableAlias, colAliases);
+    return this;
+  }
+
+  /** Add a query hint (e.g. Oracle hint expressions). */
+  hint(text: string): this {
+    this._w.hint(text);
+    return this;
+  }
+
+  /**
+   * Convert to CREATE TABLE AS SELECT and return the AST.
+   * This is a terminal operation that consumes the builder.
+   */
+  ctas(tableName: string): any {
+    return this._w.ctas(tableName);
+  }
+
+  /**
+   * Convert to CREATE TABLE AS SELECT and return generated SQL.
+   * This is a terminal operation that consumes the builder.
+   */
+  ctasSql(tableName: string, dialect: string = 'generic'): string {
+    return this._w.ctas_sql(tableName, dialect);
   }
 
   /** Add FOR UPDATE locking. */

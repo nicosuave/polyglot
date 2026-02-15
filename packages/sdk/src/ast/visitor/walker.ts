@@ -15,6 +15,21 @@ import {
   isExpressionValue,
 } from '../helpers';
 import type { NodePredicate, VisitorCallback, VisitorConfig } from './types';
+import {
+  ast_get_column_names,
+  ast_get_table_names,
+  ast_get_aggregate_functions,
+  ast_get_window_functions,
+  ast_get_functions,
+  ast_get_subqueries,
+  ast_get_literals,
+  ast_node_count,
+} from '../../../wasm/polyglot_sql_wasm.js';
+
+/** Serialize Expression to JSON for WASM functions */
+function exprToJson(node: Expression): string {
+  return JSON.stringify(node);
+}
 
 // ============================================================================
 // Core Walker
@@ -70,7 +85,7 @@ function collectExprChildren(
  * looking for Expression children — including those nested inside
  * non-Expression structs like From, Where, GroupBy, etc.
  */
-function getChildren(
+export function getChildren(
   node: Expression,
 ): Array<{ key: string; value: Expression | Expression[] }> {
   const children: Array<{ key: string; value: Expression | Expression[] }> = [];
@@ -289,101 +304,59 @@ export function getIdentifiers(node: Expression): Expression[] {
 }
 
 /**
- * Get all function calls in the AST
+ * Get all function calls in the AST (via WASM)
  */
 export function getFunctions(node: Expression): Expression[] {
-  return findByType(node, 'function');
+  const result = JSON.parse(ast_get_functions(exprToJson(node)));
+  return result.success ? JSON.parse(result.ast) : [];
 }
 
 /**
- * Get all aggregate function calls in the AST
+ * Get all aggregate function calls in the AST (via WASM)
  */
 export function getAggregateFunctions(node: Expression): Expression[] {
-  const aggregateTypes = [
-    'count',
-    'sum',
-    'avg',
-    'min',
-    'max',
-    'group_concat',
-    'string_agg',
-    'list_agg',
-    'array_agg',
-    'count_if',
-    'sum_if',
-    'stddev',
-    'stddev_pop',
-    'stddev_samp',
-    'variance',
-    'var_pop',
-    'var_samp',
-    'median',
-    'mode',
-    'first',
-    'last',
-    'any_value',
-    'approx_distinct',
-    'approx_count_distinct',
-  ];
-
-  return findAll(node, (n) => aggregateTypes.includes(getExprType(n)));
+  const result = JSON.parse(ast_get_aggregate_functions(exprToJson(node)));
+  return result.success ? JSON.parse(result.ast) : [];
 }
 
 /**
- * Get all window function calls in the AST
+ * Get all window function calls in the AST (via WASM)
  */
 export function getWindowFunctions(node: Expression): Expression[] {
-  const windowTypes = [
-    'row_number',
-    'rank',
-    'dense_rank',
-    'n_tile',
-    'lead',
-    'lag',
-    'first_value',
-    'last_value',
-    'nth_value',
-    'percent_rank',
-    'cume_dist',
-    'percentile_cont',
-    'percentile_disc',
-  ];
-
-  return findAll(node, (n) => windowTypes.includes(getExprType(n)));
+  const result = JSON.parse(ast_get_window_functions(exprToJson(node)));
+  return result.success ? JSON.parse(result.ast) : [];
 }
 
 /**
- * Get all subqueries in the AST
+ * Get all subqueries in the AST (via WASM)
  */
 export function getSubqueries(node: Expression): Expression[] {
-  return findByType(node, 'subquery');
+  const result = JSON.parse(ast_get_subqueries(exprToJson(node)));
+  return result.success ? JSON.parse(result.ast) : [];
 }
 
 /**
- * Get all literals in the AST
+ * Get all literals in the AST (via WASM)
  */
 export function getLiterals(node: Expression): Expression[] {
-  return findByType(node, 'literal');
+  const result = JSON.parse(ast_get_literals(exprToJson(node)));
+  return result.success ? JSON.parse(result.ast) : [];
 }
 
 /**
- * Get all column names as strings
+ * Get all column names as strings (via WASM)
  */
 export function getColumnNames(node: Expression): string[] {
-  return getColumns(node).map((col) => {
-    const colData = getExprData(col) as { name: { name: string } };
-    return colData.name.name;
-  });
+  const result = JSON.parse(ast_get_column_names(exprToJson(node)));
+  return result.success ? result.result : [];
 }
 
 /**
- * Get all table names as strings
+ * Get all table names as strings (via WASM)
  */
 export function getTableNames(node: Expression): string[] {
-  return getTables(node).map((tbl) => {
-    const tblData = getExprData(tbl) as { name: { name: string } };
-    return tblData.name.name;
-  });
+  const result = JSON.parse(ast_get_table_names(exprToJson(node)));
+  return result.success ? result.result : [];
 }
 
 /**
@@ -404,7 +377,7 @@ export function hasWindowFunctions(node: Expression): boolean {
  * Check if the AST contains any subqueries
  */
 export function hasSubqueries(node: Expression): boolean {
-  return some(node, (n) => getExprType(n) === 'subquery');
+  return getSubqueries(node).length > 0;
 }
 
 /**
@@ -428,8 +401,105 @@ export function getDepth(node: Expression): number {
 }
 
 /**
- * Count the total number of nodes in the AST
+ * Count the total number of nodes in the AST (via WASM)
  */
 export function nodeCount(node: Expression): number {
-  return countNodes(node, () => true);
+  const result = JSON.parse(ast_node_count(exprToJson(node)));
+  return result.success ? result.result : 0;
+}
+
+/**
+ * Find the parent of a target node in the AST.
+ *
+ * Uses reference equality (`===`) to identify the target, so the target
+ * must be a reference obtained from the same AST object graph (e.g. via
+ * `findFirst()` or `findAll()`).
+ *
+ * @returns The parent Expression, or `null` if target is the root or not found.
+ */
+export function getParent(
+  root: Expression,
+  target: Expression,
+): Expression | null {
+  let parentNode: Expression | null = null;
+
+  walk(root, {
+    enter: (node, parent) => {
+      if (node === target) {
+        parentNode = parent;
+      }
+    },
+  });
+
+  return parentNode;
+}
+
+/**
+ * Find the nearest ancestor of a target node that matches a predicate.
+ *
+ * Walks the tree from the root, tracking the ancestor stack. When the
+ * target is found, searches ancestors from nearest to farthest.
+ *
+ * Uses reference equality (`===`) to identify the target.
+ *
+ * @returns The matching ancestor, or `null` if none matches or target not found.
+ */
+export function findAncestor(
+  root: Expression,
+  target: Expression,
+  predicate: NodePredicate,
+): Expression | null {
+  const ancestors: Expression[] = [];
+  let result: Expression | null = null;
+
+  walk(root, {
+    enter: (node) => {
+      if (result !== null) return; // already found
+      if (node === target) {
+        // Search ancestors nearest-to-farthest
+        for (let i = ancestors.length - 1; i >= 0; i--) {
+          const parent = i > 0 ? ancestors[i - 1] : null;
+          if (predicate(ancestors[i], parent)) {
+            result = ancestors[i];
+            break;
+          }
+        }
+      }
+      ancestors.push(node);
+    },
+    leave: () => {
+      ancestors.pop();
+    },
+  });
+
+  return result;
+}
+
+/**
+ * Get the depth of a specific node within the AST.
+ *
+ * The root node has depth 1. Returns 0 if the target is not found.
+ *
+ * Uses reference equality (`===`) to identify the target.
+ */
+export function getNodeDepth(
+  root: Expression,
+  target: Expression,
+): number {
+  let depth = 0;
+  let currentDepth = 0;
+
+  walk(root, {
+    enter: (node) => {
+      currentDepth++;
+      if (node === target) {
+        depth = currentDepth;
+      }
+    },
+    leave: () => {
+      currentDepth--;
+    },
+  });
+
+  return depth;
 }

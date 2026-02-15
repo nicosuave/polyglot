@@ -9,7 +9,7 @@ use polyglot_sql::builder::{
     self as core_builder, CaseBuilder as CoreCaseBuilder, DeleteBuilder as CoreDeleteBuilder,
     Expr as CoreExpr, InsertBuilder as CoreInsertBuilder, MergeBuilder as CoreMergeBuilder,
     SelectBuilder as CoreSelectBuilder, SetOpBuilder as CoreSetOpBuilder,
-    UpdateBuilder as CoreUpdateBuilder,
+    UpdateBuilder as CoreUpdateBuilder, WindowDefBuilder as CoreWindowDefBuilder,
 };
 use polyglot_sql::dialects::{Dialect, DialectType};
 use polyglot_sql::expressions::Expression;
@@ -387,6 +387,25 @@ pub fn wasm_alias(expr: &WasmExpr, name: &str) -> WasmExpr {
     WasmExpr::new(core_builder::alias(expr.inner.clone(), name))
 }
 
+/// Wrap a SelectBuilder as a named subquery expression. Consumes the builder.
+#[wasm_bindgen]
+pub fn wasm_subquery(query: &mut WasmSelectBuilder, alias: &str) -> WasmExpr {
+    let q = query.inner.take().expect("Builder already consumed");
+    WasmExpr::new(core_builder::subquery(q, alias))
+}
+
+/// Create a `COUNT(DISTINCT expr)` expression.
+#[wasm_bindgen]
+pub fn wasm_count_distinct(expr: &WasmExpr) -> WasmExpr {
+    WasmExpr::new(core_builder::count_distinct(expr.inner().clone()))
+}
+
+/// Create an `EXTRACT(field FROM expr)` expression.
+#[wasm_bindgen]
+pub fn wasm_extract(field: &str, expr: &WasmExpr) -> WasmExpr {
+    WasmExpr::new(core_builder::extract_(field, expr.inner().clone()))
+}
+
 // ---------------------------------------------------------------------------
 // Helper: generate SQL with a specific dialect
 // ---------------------------------------------------------------------------
@@ -580,6 +599,56 @@ impl WasmSelectBuilder {
         if let Some(b) = self.inner.take() {
             self.inner = Some(b.for_update());
         }
+    }
+
+    // -- SORT BY --
+
+    /// Set the SORT BY clause (Hive/Spark).
+    pub fn sort_by_exprs(&mut self, exprs: &WasmExprArray) {
+        if let Some(b) = self.inner.take() {
+            self.inner = Some(b.sort_by(exprs.inner.clone()));
+        }
+    }
+
+    // -- WINDOW --
+
+    /// Add a named WINDOW clause definition.
+    pub fn window(&mut self, name: &str, def: &mut WasmWindowDefBuilder) {
+        let window_def = def.inner.take().expect("WindowDefBuilder already consumed");
+        if let Some(b) = self.inner.take() {
+            self.inner = Some(b.window(name, window_def));
+        }
+    }
+
+    // -- LATERAL VIEW --
+
+    /// Add a LATERAL VIEW clause (Hive/Spark).
+    pub fn lateral_view(&mut self, func_expr: &WasmExpr, table_alias: &str, col_aliases: Vec<String>) {
+        if let Some(b) = self.inner.take() {
+            self.inner = Some(b.lateral_view(
+                func_expr.inner.clone(),
+                table_alias,
+                col_aliases,
+            ));
+        }
+    }
+
+    // -- HINT --
+
+    /// Add a query hint.
+    pub fn hint(&mut self, hint_text: &str) {
+        if let Some(b) = self.inner.take() {
+            self.inner = Some(b.hint(hint_text));
+        }
+    }
+
+    // -- CTAS SQL --
+
+    /// Convert to CREATE TABLE AS SELECT and return generated SQL.
+    pub fn ctas_sql(&mut self, table_name: &str, dialect: &str) -> String {
+        let b = self.inner.take().expect("Builder already consumed");
+        let expr = b.ctas(table_name);
+        generate_sql(&expr, dialect)
     }
 
     // -- Set operations --
@@ -923,6 +992,41 @@ impl WasmCaseBuilder {
 pub fn wasm_case_of(operand: &WasmExpr) -> WasmCaseBuilder {
     WasmCaseBuilder {
         inner: Some(core_builder::case_of(operand.inner.clone())),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WasmWindowDefBuilder
+// ---------------------------------------------------------------------------
+
+/// Builder for named WINDOW clause definitions.
+#[wasm_bindgen]
+pub struct WasmWindowDefBuilder {
+    inner: Option<CoreWindowDefBuilder>,
+}
+
+#[wasm_bindgen]
+impl WasmWindowDefBuilder {
+    /// Create a new, empty window definition builder.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        WasmWindowDefBuilder {
+            inner: Some(CoreWindowDefBuilder::new()),
+        }
+    }
+
+    /// Set the PARTITION BY expressions.
+    pub fn partition_by(&mut self, exprs: &WasmExprArray) {
+        if let Some(b) = self.inner.take() {
+            self.inner = Some(b.partition_by(exprs.inner.clone()));
+        }
+    }
+
+    /// Set the ORDER BY expressions.
+    pub fn order_by(&mut self, exprs: &WasmExprArray) {
+        if let Some(b) = self.inner.take() {
+            self.inner = Some(b.order_by(exprs.inner.clone()));
+        }
     }
 }
 
@@ -1367,6 +1471,18 @@ mod tests {
     fn test_wasm_sql_expr() {
         let e = wasm_sql_expr("COALESCE(a, b, 0)");
         assert_eq!(e.to_sql(), "COALESCE(a, b, 0)");
+    }
+
+    #[test]
+    fn test_wasm_count_distinct() {
+        let e = wasm_count_distinct(&wasm_col("x"));
+        assert_eq!(e.to_sql(), "COUNT(DISTINCT x)");
+    }
+
+    #[test]
+    fn test_wasm_extract() {
+        let e = wasm_extract("YEAR", &wasm_col("created_at"));
+        assert_eq!(e.to_sql(), "EXTRACT(YEAR FROM created_at)");
     }
 
     #[test]

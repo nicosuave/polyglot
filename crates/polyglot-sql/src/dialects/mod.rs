@@ -93,6 +93,8 @@ use crate::generator::{Generator, GeneratorConfig};
 use crate::parser::Parser;
 use crate::tokens::{Tokenizer, TokenizerConfig};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, RwLock};
 
 /// Enumeration of all supported SQL dialects.
 ///
@@ -1323,6 +1325,252 @@ where
     transform_fn(expr)
 }
 
+/// Returns the tokenizer config, generator config, and expression transform closure
+/// for a built-in dialect type. This is the shared implementation used by both
+/// `Dialect::get()` and custom dialect construction.
+fn configs_for_dialect_type(
+    dt: DialectType,
+) -> (
+    TokenizerConfig,
+    GeneratorConfig,
+    Box<dyn Fn(Expression) -> Result<Expression> + Send + Sync>,
+) {
+    macro_rules! dialect_configs {
+        ($dialect_struct:ident) => {{
+            let d = $dialect_struct;
+            (
+                d.tokenizer_config(),
+                d.generator_config(),
+                Box::new(move |e| $dialect_struct.transform_expr(e)),
+            )
+        }};
+    }
+    match dt {
+        DialectType::PostgreSQL => dialect_configs!(PostgresDialect),
+        DialectType::MySQL => dialect_configs!(MySQLDialect),
+        DialectType::BigQuery => dialect_configs!(BigQueryDialect),
+        DialectType::Snowflake => dialect_configs!(SnowflakeDialect),
+        DialectType::DuckDB => dialect_configs!(DuckDBDialect),
+        DialectType::TSQL => dialect_configs!(TSQLDialect),
+        DialectType::Oracle => dialect_configs!(OracleDialect),
+        DialectType::Hive => dialect_configs!(HiveDialect),
+        DialectType::Spark => dialect_configs!(SparkDialect),
+        DialectType::SQLite => dialect_configs!(SQLiteDialect),
+        DialectType::Presto => dialect_configs!(PrestoDialect),
+        DialectType::Trino => dialect_configs!(TrinoDialect),
+        DialectType::Redshift => dialect_configs!(RedshiftDialect),
+        DialectType::ClickHouse => dialect_configs!(ClickHouseDialect),
+        DialectType::Databricks => dialect_configs!(DatabricksDialect),
+        DialectType::Athena => dialect_configs!(AthenaDialect),
+        DialectType::Teradata => dialect_configs!(TeradataDialect),
+        DialectType::Doris => dialect_configs!(DorisDialect),
+        DialectType::StarRocks => dialect_configs!(StarRocksDialect),
+        DialectType::Materialize => dialect_configs!(MaterializeDialect),
+        DialectType::RisingWave => dialect_configs!(RisingWaveDialect),
+        DialectType::SingleStore => dialect_configs!(SingleStoreDialect),
+        DialectType::CockroachDB => dialect_configs!(CockroachDBDialect),
+        DialectType::TiDB => dialect_configs!(TiDBDialect),
+        DialectType::Druid => dialect_configs!(DruidDialect),
+        DialectType::Solr => dialect_configs!(SolrDialect),
+        DialectType::Tableau => dialect_configs!(TableauDialect),
+        DialectType::Dune => dialect_configs!(DuneDialect),
+        DialectType::Fabric => dialect_configs!(FabricDialect),
+        DialectType::Drill => dialect_configs!(DrillDialect),
+        DialectType::Dremio => dialect_configs!(DremioDialect),
+        DialectType::Exasol => dialect_configs!(ExasolDialect),
+        _ => dialect_configs!(GenericDialect),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Custom dialect registry
+// ---------------------------------------------------------------------------
+
+static CUSTOM_DIALECT_REGISTRY: LazyLock<RwLock<HashMap<String, Arc<CustomDialectConfig>>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
+
+struct CustomDialectConfig {
+    name: String,
+    base_dialect: DialectType,
+    tokenizer_config: TokenizerConfig,
+    generator_config: GeneratorConfig,
+    transform: Option<Arc<dyn Fn(Expression) -> Result<Expression> + Send + Sync>>,
+    preprocess: Option<Arc<dyn Fn(Expression) -> Result<Expression> + Send + Sync>>,
+}
+
+/// Fluent builder for creating and registering custom SQL dialects.
+///
+/// A custom dialect is based on an existing built-in dialect and allows selective
+/// overrides of tokenizer configuration, generator configuration, and expression
+/// transforms.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use polyglot_sql::dialects::{CustomDialectBuilder, DialectType, Dialect};
+/// use polyglot_sql::generator::NormalizeFunctions;
+///
+/// CustomDialectBuilder::new("my_postgres")
+///     .based_on(DialectType::PostgreSQL)
+///     .generator_config_modifier(|gc| {
+///         gc.normalize_functions = NormalizeFunctions::Lower;
+///     })
+///     .register()
+///     .unwrap();
+///
+/// let d = Dialect::get_by_name("my_postgres").unwrap();
+/// let exprs = d.parse("SELECT COUNT(*)").unwrap();
+/// let sql = d.generate(&exprs[0]).unwrap();
+/// assert_eq!(sql, "select count(*)");
+///
+/// polyglot_sql::unregister_custom_dialect("my_postgres");
+/// ```
+pub struct CustomDialectBuilder {
+    name: String,
+    base_dialect: DialectType,
+    tokenizer_modifier: Option<Box<dyn FnOnce(&mut TokenizerConfig)>>,
+    generator_modifier: Option<Box<dyn FnOnce(&mut GeneratorConfig)>>,
+    transform: Option<Arc<dyn Fn(Expression) -> Result<Expression> + Send + Sync>>,
+    preprocess: Option<Arc<dyn Fn(Expression) -> Result<Expression> + Send + Sync>>,
+}
+
+impl CustomDialectBuilder {
+    /// Create a new builder with the given name. Defaults to `Generic` as the base dialect.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            base_dialect: DialectType::Generic,
+            tokenizer_modifier: None,
+            generator_modifier: None,
+            transform: None,
+            preprocess: None,
+        }
+    }
+
+    /// Set the base built-in dialect to inherit configuration from.
+    pub fn based_on(mut self, dialect: DialectType) -> Self {
+        self.base_dialect = dialect;
+        self
+    }
+
+    /// Provide a closure that modifies the tokenizer configuration inherited from the base dialect.
+    pub fn tokenizer_config_modifier<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(&mut TokenizerConfig) + 'static,
+    {
+        self.tokenizer_modifier = Some(Box::new(f));
+        self
+    }
+
+    /// Provide a closure that modifies the generator configuration inherited from the base dialect.
+    pub fn generator_config_modifier<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(&mut GeneratorConfig) + 'static,
+    {
+        self.generator_modifier = Some(Box::new(f));
+        self
+    }
+
+    /// Set a custom per-node expression transform function.
+    ///
+    /// This replaces the base dialect's transform. It is called on every expression
+    /// node during the recursive transform pass.
+    pub fn transform_fn<F>(mut self, f: F) -> Self
+    where
+        F: Fn(Expression) -> Result<Expression> + Send + Sync + 'static,
+    {
+        self.transform = Some(Arc::new(f));
+        self
+    }
+
+    /// Set a custom whole-tree preprocessing function.
+    ///
+    /// This replaces the base dialect's built-in preprocessing. It is called once
+    /// on the entire expression tree before the recursive per-node transform.
+    pub fn preprocess_fn<F>(mut self, f: F) -> Self
+    where
+        F: Fn(Expression) -> Result<Expression> + Send + Sync + 'static,
+    {
+        self.preprocess = Some(Arc::new(f));
+        self
+    }
+
+    /// Build the custom dialect configuration and register it in the global registry.
+    ///
+    /// Returns an error if:
+    /// - The name collides with a built-in dialect name
+    /// - A custom dialect with the same name is already registered
+    pub fn register(self) -> Result<()> {
+        // Reject names that collide with built-in dialects
+        if DialectType::from_str(&self.name).is_ok() {
+            return Err(crate::error::Error::parse(format!(
+                "Cannot register custom dialect '{}': name collides with built-in dialect",
+                self.name
+            )));
+        }
+
+        // Get base configs
+        let (mut tok_config, mut gen_config, _base_transform) =
+            configs_for_dialect_type(self.base_dialect);
+
+        // Apply modifiers
+        if let Some(tok_mod) = self.tokenizer_modifier {
+            tok_mod(&mut tok_config);
+        }
+        if let Some(gen_mod) = self.generator_modifier {
+            gen_mod(&mut gen_config);
+        }
+
+        let config = CustomDialectConfig {
+            name: self.name.clone(),
+            base_dialect: self.base_dialect,
+            tokenizer_config: tok_config,
+            generator_config: gen_config,
+            transform: self.transform,
+            preprocess: self.preprocess,
+        };
+
+        register_custom_dialect(config)
+    }
+}
+
+use std::str::FromStr;
+
+fn register_custom_dialect(config: CustomDialectConfig) -> Result<()> {
+    let mut registry = CUSTOM_DIALECT_REGISTRY
+        .write()
+        .map_err(|e| crate::error::Error::parse(format!("Registry lock poisoned: {}", e)))?;
+
+    if registry.contains_key(&config.name) {
+        return Err(crate::error::Error::parse(format!(
+            "Custom dialect '{}' is already registered",
+            config.name
+        )));
+    }
+
+    registry.insert(config.name.clone(), Arc::new(config));
+    Ok(())
+}
+
+/// Remove a custom dialect from the global registry.
+///
+/// Returns `true` if a dialect with that name was found and removed,
+/// `false` if no such custom dialect existed.
+pub fn unregister_custom_dialect(name: &str) -> bool {
+    if let Ok(mut registry) = CUSTOM_DIALECT_REGISTRY.write() {
+        registry.remove(name).is_some()
+    } else {
+        false
+    }
+}
+
+fn get_custom_dialect_config(name: &str) -> Option<Arc<CustomDialectConfig>> {
+    CUSTOM_DIALECT_REGISTRY
+        .read()
+        .ok()
+        .and_then(|registry| registry.get(name).cloned())
+}
+
 /// Main entry point for dialect-specific SQL operations.
 ///
 /// A `Dialect` bundles together a tokenizer, generator configuration, and expression
@@ -1343,8 +1591,8 @@ where
 /// assert_eq!(results[0], "SELECT CURRENT_TIMESTAMP()");
 /// ```
 ///
-/// Obtain an instance via [`Dialect::get`]. The struct is `Send + Sync` safe so it
-/// can be shared across threads.
+/// Obtain an instance via [`Dialect::get`] or [`Dialect::get_by_name`].
+/// The struct is `Send + Sync` safe so it can be shared across threads.
 pub struct Dialect {
     dialect_type: DialectType,
     tokenizer: Tokenizer,
@@ -1352,6 +1600,8 @@ pub struct Dialect {
     transformer: Box<dyn Fn(Expression) -> Result<Expression> + Send + Sync>,
     /// Optional function to get expression-specific generator config (for hybrid dialects like Athena).
     generator_config_for_expr: Option<Box<dyn Fn(&Expression) -> GeneratorConfig + Send + Sync>>,
+    /// Optional custom preprocessing function (overrides built-in preprocess for custom dialects).
+    custom_preprocess: Option<Box<dyn Fn(Expression) -> Result<Expression> + Send + Sync>>,
 }
 
 impl Dialect {
@@ -1362,140 +1612,7 @@ impl Dialect {
     /// For hybrid dialects like Athena, it also sets up expression-specific generator
     /// config routing.
     pub fn get(dialect_type: DialectType) -> Self {
-        let (tokenizer_config, generator_config, transformer): (_, _, Box<dyn Fn(Expression) -> Result<Expression> + Send + Sync>) = match dialect_type {
-            DialectType::PostgreSQL => {
-                let d = PostgresDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| PostgresDialect.transform_expr(e)))
-            }
-            DialectType::MySQL => {
-                let d = MySQLDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| MySQLDialect.transform_expr(e)))
-            }
-            DialectType::BigQuery => {
-                let d = BigQueryDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| BigQueryDialect.transform_expr(e)))
-            }
-            DialectType::Snowflake => {
-                let d = SnowflakeDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| SnowflakeDialect.transform_expr(e)))
-            }
-            DialectType::DuckDB => {
-                let d = DuckDBDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| DuckDBDialect.transform_expr(e)))
-            }
-            DialectType::TSQL => {
-                let d = TSQLDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| TSQLDialect.transform_expr(e)))
-            }
-            DialectType::Oracle => {
-                let d = OracleDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| OracleDialect.transform_expr(e)))
-            }
-            DialectType::Hive => {
-                let d = HiveDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| HiveDialect.transform_expr(e)))
-            }
-            DialectType::Spark => {
-                let d = SparkDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| SparkDialect.transform_expr(e)))
-            }
-            DialectType::SQLite => {
-                let d = SQLiteDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| SQLiteDialect.transform_expr(e)))
-            }
-            DialectType::Presto => {
-                let d = PrestoDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| PrestoDialect.transform_expr(e)))
-            }
-            DialectType::Trino => {
-                let d = TrinoDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| TrinoDialect.transform_expr(e)))
-            }
-            DialectType::Redshift => {
-                let d = RedshiftDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| RedshiftDialect.transform_expr(e)))
-            }
-            DialectType::ClickHouse => {
-                let d = ClickHouseDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| ClickHouseDialect.transform_expr(e)))
-            }
-            DialectType::Databricks => {
-                let d = DatabricksDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| DatabricksDialect.transform_expr(e)))
-            }
-            DialectType::Athena => {
-                let d = AthenaDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| AthenaDialect.transform_expr(e)))
-            }
-            DialectType::Teradata => {
-                let d = TeradataDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| TeradataDialect.transform_expr(e)))
-            }
-            DialectType::Doris => {
-                let d = DorisDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| DorisDialect.transform_expr(e)))
-            }
-            DialectType::StarRocks => {
-                let d = StarRocksDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| StarRocksDialect.transform_expr(e)))
-            }
-            DialectType::Materialize => {
-                let d = MaterializeDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| MaterializeDialect.transform_expr(e)))
-            }
-            DialectType::RisingWave => {
-                let d = RisingWaveDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| RisingWaveDialect.transform_expr(e)))
-            }
-            DialectType::SingleStore => {
-                let d = SingleStoreDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| SingleStoreDialect.transform_expr(e)))
-            }
-            DialectType::CockroachDB => {
-                let d = CockroachDBDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| CockroachDBDialect.transform_expr(e)))
-            }
-            DialectType::TiDB => {
-                let d = TiDBDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| TiDBDialect.transform_expr(e)))
-            }
-            DialectType::Druid => {
-                let d = DruidDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| DruidDialect.transform_expr(e)))
-            }
-            DialectType::Solr => {
-                let d = SolrDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| SolrDialect.transform_expr(e)))
-            }
-            DialectType::Tableau => {
-                let d = TableauDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| TableauDialect.transform_expr(e)))
-            }
-            DialectType::Dune => {
-                let d = DuneDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| DuneDialect.transform_expr(e)))
-            }
-            DialectType::Fabric => {
-                let d = FabricDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| FabricDialect.transform_expr(e)))
-            }
-            DialectType::Drill => {
-                let d = DrillDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| DrillDialect.transform_expr(e)))
-            }
-            DialectType::Dremio => {
-                let d = DremioDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| DremioDialect.transform_expr(e)))
-            }
-            DialectType::Exasol => {
-                let d = ExasolDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| ExasolDialect.transform_expr(e)))
-            }
-            _ => {
-                let d = GenericDialect;
-                (d.tokenizer_config(), d.generator_config(), Box::new(move |e| GenericDialect.transform_expr(e)))
-            }
-        };
+        let (tokenizer_config, generator_config, transformer) = configs_for_dialect_type(dialect_type);
 
         // Set up expression-specific generator config for hybrid dialects
         let generator_config_for_expr: Option<Box<dyn Fn(&Expression) -> GeneratorConfig + Send + Sync>> = match dialect_type {
@@ -1509,6 +1626,52 @@ impl Dialect {
             generator_config,
             transformer,
             generator_config_for_expr,
+            custom_preprocess: None,
+        }
+    }
+
+    /// Look up a dialect by string name.
+    ///
+    /// Checks built-in dialect names first (via [`DialectType::from_str`]), then
+    /// falls back to the custom dialect registry. Returns `None` if no dialect
+    /// with the given name exists.
+    pub fn get_by_name(name: &str) -> Option<Self> {
+        // Try built-in first
+        if let Ok(dt) = DialectType::from_str(name) {
+            return Some(Self::get(dt));
+        }
+
+        // Try custom registry
+        let config = get_custom_dialect_config(name)?;
+        Some(Self::from_custom_config(&config))
+    }
+
+    /// Construct a `Dialect` from a custom dialect configuration.
+    fn from_custom_config(config: &CustomDialectConfig) -> Self {
+        // Build the transformer: use custom if provided, else use base dialect's
+        let transformer: Box<dyn Fn(Expression) -> Result<Expression> + Send + Sync> =
+            if let Some(ref custom_transform) = config.transform {
+                let t = Arc::clone(custom_transform);
+                Box::new(move |e| t(e))
+            } else {
+                let (_, _, base_transform) = configs_for_dialect_type(config.base_dialect);
+                base_transform
+            };
+
+        // Build the custom preprocess: use custom if provided
+        let custom_preprocess: Option<Box<dyn Fn(Expression) -> Result<Expression> + Send + Sync>> =
+            config.preprocess.as_ref().map(|p| {
+                let p = Arc::clone(p);
+                Box::new(move |e: Expression| p(e)) as Box<dyn Fn(Expression) -> Result<Expression> + Send + Sync>
+            });
+
+        Self {
+            dialect_type: config.base_dialect,
+            tokenizer: Tokenizer::new(config.tokenizer_config.clone()),
+            generator_config: config.generator_config.clone(),
+            transformer,
+            generator_config_for_expr: None,
+            custom_preprocess,
         }
     }
 
@@ -1601,6 +1764,11 @@ impl Dialect {
 
     /// Apply dialect-specific preprocessing transforms
     fn preprocess(&self, expr: Expression) -> Result<Expression> {
+        // If a custom preprocess function is set, use it instead of the built-in logic
+        if let Some(ref custom_preprocess) = self.custom_preprocess {
+            return custom_preprocess(expr);
+        }
+
         use crate::transforms;
 
         match self.dialect_type {

@@ -673,6 +673,186 @@ pub fn contains_subquery(expr: &Expression) -> bool {
     expr.contains(is_subquery)
 }
 
+// ---------------------------------------------------------------------------
+// Extended type predicates
+// ---------------------------------------------------------------------------
+
+/// Macro for generating simple type-predicate functions.
+macro_rules! is_type {
+    ($name:ident, $($variant:pat),+ $(,)?) => {
+        /// Returns `true` if `expr` matches the expected AST variant(s).
+        pub fn $name(expr: &Expression) -> bool {
+            matches!(expr, $($variant)|+)
+        }
+    };
+}
+
+// Query
+is_type!(is_insert, Expression::Insert(_));
+is_type!(is_update, Expression::Update(_));
+is_type!(is_delete, Expression::Delete(_));
+is_type!(is_union, Expression::Union(_));
+is_type!(is_intersect, Expression::Intersect(_));
+is_type!(is_except, Expression::Except(_));
+
+// Identifiers & literals
+is_type!(is_boolean, Expression::Boolean(_));
+is_type!(is_null_literal, Expression::Null(_));
+is_type!(is_star, Expression::Star(_));
+is_type!(is_identifier, Expression::Identifier(_));
+is_type!(is_table, Expression::Table(_));
+
+// Comparison
+is_type!(is_eq, Expression::Eq(_));
+is_type!(is_neq, Expression::Neq(_));
+is_type!(is_lt, Expression::Lt(_));
+is_type!(is_lte, Expression::Lte(_));
+is_type!(is_gt, Expression::Gt(_));
+is_type!(is_gte, Expression::Gte(_));
+is_type!(is_like, Expression::Like(_));
+is_type!(is_ilike, Expression::ILike(_));
+
+// Arithmetic
+is_type!(is_add, Expression::Add(_));
+is_type!(is_sub, Expression::Sub(_));
+is_type!(is_mul, Expression::Mul(_));
+is_type!(is_div, Expression::Div(_));
+is_type!(is_mod, Expression::Mod(_));
+is_type!(is_concat, Expression::Concat(_));
+
+// Logical
+is_type!(is_and, Expression::And(_));
+is_type!(is_or, Expression::Or(_));
+is_type!(is_not, Expression::Not(_));
+
+// Predicates
+is_type!(is_in, Expression::In(_));
+is_type!(is_between, Expression::Between(_));
+is_type!(is_is_null, Expression::IsNull(_));
+is_type!(is_exists, Expression::Exists(_));
+
+// Functions
+is_type!(is_count, Expression::Count(_));
+is_type!(is_sum, Expression::Sum(_));
+is_type!(is_avg, Expression::Avg(_));
+is_type!(is_min_func, Expression::Min(_));
+is_type!(is_max_func, Expression::Max(_));
+is_type!(is_coalesce, Expression::Coalesce(_));
+is_type!(is_null_if, Expression::NullIf(_));
+is_type!(is_cast, Expression::Cast(_));
+is_type!(is_try_cast, Expression::TryCast(_));
+is_type!(is_safe_cast, Expression::SafeCast(_));
+is_type!(is_case, Expression::Case(_));
+
+// Clauses
+is_type!(is_from, Expression::From(_));
+is_type!(is_join, Expression::Join(_));
+is_type!(is_where, Expression::Where(_));
+is_type!(is_group_by, Expression::GroupBy(_));
+is_type!(is_having, Expression::Having(_));
+is_type!(is_order_by, Expression::OrderBy(_));
+is_type!(is_limit, Expression::Limit(_));
+is_type!(is_offset, Expression::Offset(_));
+is_type!(is_with, Expression::With(_));
+is_type!(is_cte, Expression::Cte(_));
+is_type!(is_alias, Expression::Alias(_));
+is_type!(is_paren, Expression::Paren(_));
+is_type!(is_ordered, Expression::Ordered(_));
+
+// DDL
+is_type!(is_create_table, Expression::CreateTable(_));
+is_type!(is_drop_table, Expression::DropTable(_));
+is_type!(is_alter_table, Expression::AlterTable(_));
+is_type!(is_create_index, Expression::CreateIndex(_));
+is_type!(is_drop_index, Expression::DropIndex(_));
+is_type!(is_create_view, Expression::CreateView(_));
+is_type!(is_drop_view, Expression::DropView(_));
+
+// ---------------------------------------------------------------------------
+// Composite predicates
+// ---------------------------------------------------------------------------
+
+/// Returns `true` if `expr` is a query statement (SELECT, INSERT, UPDATE, or DELETE).
+pub fn is_query(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::Select(_) | Expression::Insert(_) | Expression::Update(_) | Expression::Delete(_)
+    )
+}
+
+/// Returns `true` if `expr` is a set operation (UNION, INTERSECT, or EXCEPT).
+pub fn is_set_operation(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::Union(_) | Expression::Intersect(_) | Expression::Except(_)
+    )
+}
+
+/// Returns `true` if `expr` is a comparison operator.
+pub fn is_comparison(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::Eq(_)
+            | Expression::Neq(_)
+            | Expression::Lt(_)
+            | Expression::Lte(_)
+            | Expression::Gt(_)
+            | Expression::Gte(_)
+            | Expression::Like(_)
+            | Expression::ILike(_)
+    )
+}
+
+/// Returns `true` if `expr` is an arithmetic operator.
+pub fn is_arithmetic(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::Add(_)
+            | Expression::Sub(_)
+            | Expression::Mul(_)
+            | Expression::Div(_)
+            | Expression::Mod(_)
+    )
+}
+
+/// Returns `true` if `expr` is a logical operator (AND, OR, NOT).
+pub fn is_logical(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::And(_) | Expression::Or(_) | Expression::Not(_)
+    )
+}
+
+/// Returns `true` if `expr` is a DDL statement.
+pub fn is_ddl(expr: &Expression) -> bool {
+    matches!(
+        expr,
+        Expression::CreateTable(_)
+            | Expression::DropTable(_)
+            | Expression::AlterTable(_)
+            | Expression::CreateIndex(_)
+            | Expression::DropIndex(_)
+            | Expression::CreateView(_)
+            | Expression::DropView(_)
+            | Expression::AlterView(_)
+            | Expression::CreateSchema(_)
+            | Expression::DropSchema(_)
+            | Expression::CreateDatabase(_)
+            | Expression::DropDatabase(_)
+            | Expression::CreateFunction(_)
+            | Expression::DropFunction(_)
+            | Expression::CreateProcedure(_)
+            | Expression::DropProcedure(_)
+            | Expression::CreateSequence(_)
+            | Expression::DropSequence(_)
+            | Expression::AlterSequence(_)
+            | Expression::CreateTrigger(_)
+            | Expression::DropTrigger(_)
+            | Expression::CreateType(_)
+            | Expression::DropType(_)
+    )
+}
+
 /// Find the parent of `target` within the tree rooted at `root`.
 ///
 /// Uses pointer identity ([`std::ptr::eq`]) — `target` must be a reference

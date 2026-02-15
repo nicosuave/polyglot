@@ -652,7 +652,7 @@ describe('WHERE Clause Manipulation', () => {
       const condition = col('a').eq(lit(1)).toJSON() as Expression;
       const result = addWhere(literalAst, condition);
 
-      expect(result).toBe(literalAst);
+      expect(result).toStrictEqual(literalAst);
     });
   });
 

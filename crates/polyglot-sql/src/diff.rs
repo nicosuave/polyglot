@@ -8,11 +8,13 @@
 use crate::dialects::DialectType;
 use crate::expressions::Expression;
 use crate::generator::{Generator, GeneratorConfig};
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 
 /// Types of edits that can occur between two ASTs
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Edit {
     /// A new node has been inserted
     Insert { expression: Expression },
@@ -43,7 +45,7 @@ impl Edit {
 }
 
 /// Configuration for the diff algorithm
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffConfig {
     /// Dice coefficient threshold for internal node matching (default 0.6)
     pub f: f64,

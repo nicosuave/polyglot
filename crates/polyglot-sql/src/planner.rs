@@ -5,6 +5,7 @@
 //!
 
 use crate::expressions::{Expression, JoinKind};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 /// A query execution plan
@@ -65,7 +66,7 @@ impl Plan {
 }
 
 /// A step in the execution plan
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step {
     /// Name of this step
     pub name: String,
@@ -88,7 +89,8 @@ pub struct Step {
 }
 
 /// Types of execution steps
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StepKind {
     /// Scan a table
     Scan,
@@ -103,7 +105,8 @@ pub enum StepKind {
 }
 
 /// Types of joins in execution plans
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum JoinType {
     Inner,
     Left,
@@ -113,7 +116,8 @@ pub enum JoinType {
 }
 
 /// Types of set operations
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SetOperationType {
     Union,
     UnionAll,

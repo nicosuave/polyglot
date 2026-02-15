@@ -344,12 +344,14 @@ export {
   // Query builders
   SelectBuilder,
   SetOpBuilder,
+  WindowDefBuilder,
   select,
   sign,
   sqlExpr,
   sqlNull,
   sqrt,
   star,
+  subquery,
   substring,
   sum,
   table,
@@ -367,6 +369,31 @@ export type {
 } from './validation';
 // Re-export validation module
 export { ValidationSeverity, validate } from './validation';
+// Re-export lineage module
+export { getSourceTables, lineage } from './lineage';
+export type {
+  LineageNode,
+  LineageResult,
+  SourceTablesResult,
+} from './lineage';
+// Re-export diff module
+export { changesOnly, diff, hasChanges } from './diff';
+export type {
+  DiffEdit,
+  DiffOptions,
+  DiffResult,
+  EditType,
+} from './diff';
+// Re-export planner module
+export { plan } from './planner';
+export type {
+  JoinType as PlanJoinType,
+  PlanResult,
+  PlanStep,
+  QueryPlan,
+  SetOperationType,
+  StepKind,
+} from './planner';
 export type {
   ColumnSchema,
   Schema,
@@ -374,6 +401,11 @@ export type {
   TableSchema,
 } from './validation/schema-validator';
 export { validateWithSchema } from './validation/schema-validator';
+
+// Import new modules for default export
+import { lineage, getSourceTables } from './lineage';
+import { diff, hasChanges, changesOnly } from './diff';
+import { plan } from './planner';
 
 // Default export
 export default {
@@ -385,6 +417,12 @@ export default {
   format,
   getDialects,
   getVersion,
+  lineage,
+  getSourceTables,
+  diff,
+  hasChanges,
+  changesOnly,
+  plan,
   Dialect,
   Polyglot,
 };

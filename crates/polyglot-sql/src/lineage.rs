@@ -10,10 +10,11 @@ use crate::expressions::Expression;
 use crate::scope::{build_scope, Scope};
 use crate::traversal::ExpressionWalk;
 use crate::Result;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 /// A node in the column lineage graph
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LineageNode {
     /// Name of this lineage step (e.g., "table.column")
     pub name: String,

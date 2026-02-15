@@ -20,6 +20,26 @@ import type {
   TransformCallback,
   TransformConfig,
 } from './types';
+import {
+  ast_rename_columns,
+  ast_rename_tables,
+  ast_qualify_columns,
+  ast_add_where,
+  ast_remove_where,
+  ast_set_limit,
+  ast_set_distinct,
+} from '../../../wasm/polyglot_sql_wasm.js';
+
+/** Serialize Expression to JSON for WASM functions */
+function exprToJson(node: Expression): string {
+  return JSON.stringify(node);
+}
+
+/** Parse an AstResult JSON string, returning the expression or null */
+function parseAstResult(json: string): Expression | null {
+  const result = JSON.parse(json);
+  return result.success ? JSON.parse(result.ast) : null;
+}
 
 // ============================================================================
 // Core Transformer
@@ -236,7 +256,7 @@ export function replaceByType(
 // ============================================================================
 
 /**
- * Rename columns in the AST
+ * Rename columns in the AST (via WASM)
  *
  * @example
  * ```typescript
@@ -250,37 +270,12 @@ export function renameColumns(
   node: Expression,
   mapping: Record<string, string>,
 ): Expression {
-  return transform(node, {
-    column: (n) => {
-      const data = getExprData(n) as {
-        name: { name: string; quoted: boolean };
-        table: unknown;
-      };
-      const oldName = data.name.name;
-      if (mapping[oldName]) {
-        return makeExpr('column', {
-          ...data,
-          name: { ...data.name, name: mapping[oldName] },
-        });
-      }
-      return undefined;
-    },
-    identifier: (n) => {
-      const data = getExprData(n) as { name: string; quoted: boolean };
-      const oldName = data.name;
-      if (mapping[oldName]) {
-        return makeExpr('identifier', {
-          ...data,
-          name: mapping[oldName],
-        });
-      }
-      return undefined;
-    },
-  });
+  const result = parseAstResult(ast_rename_columns(exprToJson(node), JSON.stringify(mapping)));
+  return result ?? node;
 }
 
 /**
- * Rename tables in the AST
+ * Rename tables in the AST (via WASM)
  *
  * @example
  * ```typescript
@@ -294,25 +289,12 @@ export function renameTables(
   node: Expression,
   mapping: Record<string, string>,
 ): Expression {
-  return transform(node, {
-    table: (n) => {
-      const data = getExprData(n) as {
-        name: { name: string; quoted: boolean };
-      };
-      const oldName = data.name.name;
-      if (mapping[oldName]) {
-        return makeExpr('table', {
-          ...data,
-          name: { ...data.name, name: mapping[oldName] },
-        });
-      }
-      return undefined;
-    },
-  });
+  const result = parseAstResult(ast_rename_tables(exprToJson(node), JSON.stringify(mapping)));
+  return result ?? node;
 }
 
 /**
- * Qualify unqualified column references with a table name
+ * Qualify unqualified column references with a table name (via WASM)
  *
  * @example
  * ```typescript
@@ -325,18 +307,8 @@ export function qualifyColumns(
   node: Expression,
   tableName: string,
 ): Expression {
-  return transform(node, {
-    column: (n) => {
-      const data = getExprData(n) as { table: { name: string } | null };
-      if (data.table === null) {
-        return makeExpr('column', {
-          ...data,
-          table: { name: tableName, quoted: false },
-        });
-      }
-      return undefined;
-    },
-  });
+  const result = parseAstResult(ast_qualify_columns(exprToJson(node), tableName));
+  return result ?? node;
 }
 
 // ============================================================================
@@ -344,7 +316,7 @@ export function qualifyColumns(
 // ============================================================================
 
 /**
- * Add a condition to the WHERE clause of a SELECT
+ * Add a condition to the WHERE clause of a SELECT (via WASM)
  *
  * @example
  * ```typescript
@@ -356,48 +328,16 @@ export function addWhere(
   condition: Expression,
   operator: 'and' | 'or' = 'and',
 ): Expression {
-  if (getExprType(node) !== 'select') {
-    return node;
-  }
-
-  const selectData = getExprData(node) as {
-    where_clause: { this: Expression } | null;
-  };
-
-  if (selectData.where_clause === null) {
-    // No existing WHERE — create raw Where struct (not Expression envelope)
-    return makeExpr('select', {
-      ...selectData,
-      where_clause: { this: condition },
-    });
-  }
-
-  // Get the existing WHERE condition from the raw Where struct
-  const existingCondition = selectData.where_clause.this;
-  const combinedCondition = makeExpr(operator, {
-    left: existingCondition,
-    right: condition,
-  });
-
-  return makeExpr('select', {
-    ...selectData,
-    where_clause: { this: combinedCondition },
-  });
+  const result = parseAstResult(ast_add_where(exprToJson(node), exprToJson(condition), operator === 'or'));
+  return result ?? node;
 }
 
 /**
- * Remove the WHERE clause from a SELECT
+ * Remove the WHERE clause from a SELECT (via WASM)
  */
 export function removeWhere(node: Expression): Expression {
-  if (getExprType(node) !== 'select') {
-    return node;
-  }
-
-  const selectData = getExprData(node);
-  return makeExpr('select', {
-    ...selectData,
-    where_clause: null,
-  });
+  const result = parseAstResult(ast_remove_where(exprToJson(node)));
+  return result ?? node;
 }
 
 // ============================================================================
@@ -448,26 +388,28 @@ export function removeSelectColumns(
 
 /**
  * Set or update the LIMIT clause
+ *
+ * When limit is a number, delegates to WASM. When limit is an Expression,
+ * falls back to pure-TS manipulation.
  */
 export function setLimit(
   node: Expression,
   limit: number | Expression,
 ): Expression {
+  if (typeof limit === 'number') {
+    const result = parseAstResult(ast_set_limit(exprToJson(node), limit));
+    return result ?? node;
+  }
+
+  // Fall back to TS for Expression limits
   if (getExprType(node) !== 'select') {
     return node;
   }
 
   const selectData = getExprData(node);
-
-  const limitExpr: Expression =
-    typeof limit === 'number'
-      ? makeExpr('literal', { literal_type: 'number', value: String(limit) })
-      : limit;
-
-  // Select.limit is a raw Limit struct, not an Expression envelope
   return makeExpr('select', {
     ...selectData,
-    limit: { this: limitExpr },
+    limit: { this: limit },
   });
 }
 
@@ -517,21 +459,14 @@ export function removeLimitOffset(node: Expression): Expression {
 // ============================================================================
 
 /**
- * Set SELECT DISTINCT
+ * Set SELECT DISTINCT (via WASM)
  */
 export function setDistinct(
   node: Expression,
   distinct: boolean = true,
 ): Expression {
-  if (getExprType(node) !== 'select') {
-    return node;
-  }
-
-  const selectData = getExprData(node);
-  return makeExpr('select', {
-    ...selectData,
-    distinct,
-  });
+  const result = parseAstResult(ast_set_distinct(exprToJson(node), distinct));
+  return result ?? node;
 }
 
 // ============================================================================

@@ -296,6 +296,373 @@ pub fn condition(sql: &str) -> Expr {
 }
 
 // ---------------------------------------------------------------------------
+// Function helpers — typed AST constructors
+// ---------------------------------------------------------------------------
+
+// -- Aggregates ---------------------------------------------------------------
+
+/// Create a `COUNT(expr)` expression.
+pub fn count(expr: Expr) -> Expr {
+    Expr(Expression::Count(Box::new(CountFunc {
+        this: Some(expr.0),
+        star: false,
+        distinct: false,
+        filter: None,
+        ignore_nulls: None,
+        original_name: None,
+    })))
+}
+
+/// Create a `COUNT(*)` expression.
+pub fn count_star() -> Expr {
+    Expr(Expression::Count(Box::new(CountFunc {
+        this: None,
+        star: true,
+        distinct: false,
+        filter: None,
+        ignore_nulls: None,
+        original_name: None,
+    })))
+}
+
+/// Create a `COUNT(DISTINCT expr)` expression.
+pub fn count_distinct(expr: Expr) -> Expr {
+    Expr(Expression::Count(Box::new(CountFunc {
+        this: Some(expr.0),
+        star: false,
+        distinct: true,
+        filter: None,
+        ignore_nulls: None,
+        original_name: None,
+    })))
+}
+
+/// Create a `SUM(expr)` expression.
+pub fn sum(expr: Expr) -> Expr {
+    Expr(Expression::Sum(Box::new(AggFunc {
+        this: expr.0,
+        distinct: false,
+        filter: None,
+        order_by: vec![],
+        name: None,
+        ignore_nulls: None,
+        having_max: None,
+        limit: None,
+    })))
+}
+
+/// Create an `AVG(expr)` expression.
+pub fn avg(expr: Expr) -> Expr {
+    Expr(Expression::Avg(Box::new(AggFunc {
+        this: expr.0,
+        distinct: false,
+        filter: None,
+        order_by: vec![],
+        name: None,
+        ignore_nulls: None,
+        having_max: None,
+        limit: None,
+    })))
+}
+
+/// Create a `MIN(expr)` expression. Named `min_` to avoid conflict with `std::cmp::min`.
+pub fn min_(expr: Expr) -> Expr {
+    Expr(Expression::Min(Box::new(AggFunc {
+        this: expr.0,
+        distinct: false,
+        filter: None,
+        order_by: vec![],
+        name: None,
+        ignore_nulls: None,
+        having_max: None,
+        limit: None,
+    })))
+}
+
+/// Create a `MAX(expr)` expression. Named `max_` to avoid conflict with `std::cmp::max`.
+pub fn max_(expr: Expr) -> Expr {
+    Expr(Expression::Max(Box::new(AggFunc {
+        this: expr.0,
+        distinct: false,
+        filter: None,
+        order_by: vec![],
+        name: None,
+        ignore_nulls: None,
+        having_max: None,
+        limit: None,
+    })))
+}
+
+/// Create an `APPROX_DISTINCT(expr)` expression.
+pub fn approx_distinct(expr: Expr) -> Expr {
+    Expr(Expression::ApproxDistinct(Box::new(AggFunc {
+        this: expr.0,
+        distinct: false,
+        filter: None,
+        order_by: vec![],
+        name: None,
+        ignore_nulls: None,
+        having_max: None,
+        limit: None,
+    })))
+}
+
+// -- String functions ---------------------------------------------------------
+
+/// Create an `UPPER(expr)` expression.
+pub fn upper(expr: Expr) -> Expr {
+    Expr(Expression::Upper(Box::new(UnaryFunc::new(expr.0))))
+}
+
+/// Create a `LOWER(expr)` expression.
+pub fn lower(expr: Expr) -> Expr {
+    Expr(Expression::Lower(Box::new(UnaryFunc::new(expr.0))))
+}
+
+/// Create a `LENGTH(expr)` expression.
+pub fn length(expr: Expr) -> Expr {
+    Expr(Expression::Length(Box::new(UnaryFunc::new(expr.0))))
+}
+
+/// Create a `TRIM(expr)` expression.
+pub fn trim(expr: Expr) -> Expr {
+    Expr(Expression::Trim(Box::new(TrimFunc {
+        this: expr.0,
+        characters: None,
+        position: TrimPosition::Both,
+        sql_standard_syntax: false,
+        position_explicit: false,
+    })))
+}
+
+/// Create an `LTRIM(expr)` expression.
+pub fn ltrim(expr: Expr) -> Expr {
+    Expr(Expression::LTrim(Box::new(UnaryFunc::new(expr.0))))
+}
+
+/// Create an `RTRIM(expr)` expression.
+pub fn rtrim(expr: Expr) -> Expr {
+    Expr(Expression::RTrim(Box::new(UnaryFunc::new(expr.0))))
+}
+
+/// Create a `REVERSE(expr)` expression.
+pub fn reverse(expr: Expr) -> Expr {
+    Expr(Expression::Reverse(Box::new(UnaryFunc::new(expr.0))))
+}
+
+/// Create an `INITCAP(expr)` expression.
+pub fn initcap(expr: Expr) -> Expr {
+    Expr(Expression::Initcap(Box::new(UnaryFunc::new(expr.0))))
+}
+
+/// Create a `SUBSTRING(expr, start, len)` expression.
+pub fn substring(expr: Expr, start: Expr, len: Option<Expr>) -> Expr {
+    Expr(Expression::Substring(Box::new(SubstringFunc {
+        this: expr.0,
+        start: start.0,
+        length: len.map(|l| l.0),
+        from_for_syntax: false,
+    })))
+}
+
+/// Create a `REPLACE(expr, old, new)` expression. Named `replace_` to avoid
+/// conflict with the `str::replace` method.
+pub fn replace_(expr: Expr, old: Expr, new: Expr) -> Expr {
+    Expr(Expression::Replace(Box::new(ReplaceFunc {
+        this: expr.0,
+        old: old.0,
+        new: new.0,
+    })))
+}
+
+/// Create a `CONCAT_WS(separator, exprs...)` expression.
+pub fn concat_ws(separator: Expr, exprs: impl IntoIterator<Item = Expr>) -> Expr {
+    Expr(Expression::ConcatWs(Box::new(ConcatWs {
+        separator: separator.0,
+        expressions: exprs.into_iter().map(|e| e.0).collect(),
+    })))
+}
+
+// -- Null handling ------------------------------------------------------------
+
+/// Create a `COALESCE(exprs...)` expression.
+pub fn coalesce(exprs: impl IntoIterator<Item = Expr>) -> Expr {
+    Expr(Expression::Coalesce(Box::new(VarArgFunc {
+        expressions: exprs.into_iter().map(|e| e.0).collect(),
+        original_name: None,
+    })))
+}
+
+/// Create a `NULLIF(expr1, expr2)` expression.
+pub fn null_if(expr1: Expr, expr2: Expr) -> Expr {
+    Expr(Expression::NullIf(Box::new(BinaryFunc {
+        this: expr1.0,
+        expression: expr2.0,
+        original_name: None,
+    })))
+}
+
+/// Create an `IFNULL(expr, fallback)` expression.
+pub fn if_null(expr: Expr, fallback: Expr) -> Expr {
+    Expr(Expression::IfNull(Box::new(BinaryFunc {
+        this: expr.0,
+        expression: fallback.0,
+        original_name: None,
+    })))
+}
+
+// -- Math functions -----------------------------------------------------------
+
+/// Create an `ABS(expr)` expression.
+pub fn abs(expr: Expr) -> Expr {
+    Expr(Expression::Abs(Box::new(UnaryFunc::new(expr.0))))
+}
+
+/// Create a `ROUND(expr, decimals)` expression.
+pub fn round(expr: Expr, decimals: Option<Expr>) -> Expr {
+    Expr(Expression::Round(Box::new(RoundFunc {
+        this: expr.0,
+        decimals: decimals.map(|d| d.0),
+    })))
+}
+
+/// Create a `FLOOR(expr)` expression.
+pub fn floor(expr: Expr) -> Expr {
+    Expr(Expression::Floor(Box::new(FloorFunc {
+        this: expr.0,
+        scale: None,
+        to: None,
+    })))
+}
+
+/// Create a `CEIL(expr)` expression.
+pub fn ceil(expr: Expr) -> Expr {
+    Expr(Expression::Ceil(Box::new(CeilFunc {
+        this: expr.0,
+        decimals: None,
+        to: None,
+    })))
+}
+
+/// Create a `POWER(base, exp)` expression.
+pub fn power(base: Expr, exponent: Expr) -> Expr {
+    Expr(Expression::Power(Box::new(BinaryFunc {
+        this: base.0,
+        expression: exponent.0,
+        original_name: None,
+    })))
+}
+
+/// Create a `SQRT(expr)` expression.
+pub fn sqrt(expr: Expr) -> Expr {
+    Expr(Expression::Sqrt(Box::new(UnaryFunc::new(expr.0))))
+}
+
+/// Create a `LN(expr)` expression.
+pub fn ln(expr: Expr) -> Expr {
+    Expr(Expression::Ln(Box::new(UnaryFunc::new(expr.0))))
+}
+
+/// Create an `EXP(expr)` expression. Named `exp_` to avoid conflict with `std::f64::consts`.
+pub fn exp_(expr: Expr) -> Expr {
+    Expr(Expression::Exp(Box::new(UnaryFunc::new(expr.0))))
+}
+
+/// Create a `SIGN(expr)` expression.
+pub fn sign(expr: Expr) -> Expr {
+    Expr(Expression::Sign(Box::new(UnaryFunc::new(expr.0))))
+}
+
+/// Create a `GREATEST(exprs...)` expression.
+pub fn greatest(exprs: impl IntoIterator<Item = Expr>) -> Expr {
+    Expr(Expression::Greatest(Box::new(VarArgFunc {
+        expressions: exprs.into_iter().map(|e| e.0).collect(),
+        original_name: None,
+    })))
+}
+
+/// Create a `LEAST(exprs...)` expression.
+pub fn least(exprs: impl IntoIterator<Item = Expr>) -> Expr {
+    Expr(Expression::Least(Box::new(VarArgFunc {
+        expressions: exprs.into_iter().map(|e| e.0).collect(),
+        original_name: None,
+    })))
+}
+
+// -- Date/time functions ------------------------------------------------------
+
+/// Create a `CURRENT_DATE` expression.
+pub fn current_date_() -> Expr {
+    Expr(Expression::CurrentDate(CurrentDate))
+}
+
+/// Create a `CURRENT_TIME` expression.
+pub fn current_time_() -> Expr {
+    Expr(Expression::CurrentTime(CurrentTime { precision: None }))
+}
+
+/// Create a `CURRENT_TIMESTAMP` expression.
+pub fn current_timestamp_() -> Expr {
+    Expr(Expression::CurrentTimestamp(CurrentTimestamp {
+        precision: None,
+        sysdate: false,
+    }))
+}
+
+/// Create an `EXTRACT(field FROM expr)` expression.
+pub fn extract_(field: &str, expr: Expr) -> Expr {
+    Expr(Expression::Extract(Box::new(ExtractFunc {
+        this: expr.0,
+        field: parse_datetime_field(field),
+    })))
+}
+
+/// Parse a datetime field name string into a [`DateTimeField`] enum value.
+fn parse_datetime_field(field: &str) -> DateTimeField {
+    match field.to_uppercase().as_str() {
+        "YEAR" => DateTimeField::Year,
+        "MONTH" => DateTimeField::Month,
+        "DAY" => DateTimeField::Day,
+        "HOUR" => DateTimeField::Hour,
+        "MINUTE" => DateTimeField::Minute,
+        "SECOND" => DateTimeField::Second,
+        "MILLISECOND" => DateTimeField::Millisecond,
+        "MICROSECOND" => DateTimeField::Microsecond,
+        "DOW" | "DAYOFWEEK" => DateTimeField::DayOfWeek,
+        "DOY" | "DAYOFYEAR" => DateTimeField::DayOfYear,
+        "WEEK" => DateTimeField::Week,
+        "QUARTER" => DateTimeField::Quarter,
+        "EPOCH" => DateTimeField::Epoch,
+        "TIMEZONE" => DateTimeField::Timezone,
+        "TIMEZONE_HOUR" => DateTimeField::TimezoneHour,
+        "TIMEZONE_MINUTE" => DateTimeField::TimezoneMinute,
+        "DATE" => DateTimeField::Date,
+        "TIME" => DateTimeField::Time,
+        other => DateTimeField::Custom(other.to_string()),
+    }
+}
+
+// -- Window functions ---------------------------------------------------------
+
+/// Create a `ROW_NUMBER()` expression.
+pub fn row_number() -> Expr {
+    Expr(Expression::RowNumber(RowNumber))
+}
+
+/// Create a `RANK()` expression. Named `rank_` to avoid confusion with `Rank` struct.
+pub fn rank_() -> Expr {
+    Expr(Expression::Rank(Rank {
+        order_by: None,
+        args: vec![],
+    }))
+}
+
+/// Create a `DENSE_RANK()` expression.
+pub fn dense_rank() -> Expr {
+    Expr(Expression::DenseRank(DenseRank { args: vec![] }))
+}
+
+// ---------------------------------------------------------------------------
 // Query starters
 // ---------------------------------------------------------------------------
 
@@ -912,6 +1279,38 @@ impl SelectBuilder {
                             explicit_asc: false,
                             with_fill: None,
                         }
+                    }
+                })
+                .collect(),
+        });
+        self
+    }
+
+    /// Set the SORT BY clause with the given sort expressions.
+    ///
+    /// SORT BY is used in Hive/Spark to sort data within each reducer (partition),
+    /// as opposed to ORDER BY which sorts globally. Expressions that are not already
+    /// wrapped with [`.asc()`](Expr::asc) or [`.desc()`](Expr::desc) default to
+    /// ascending order.
+    pub fn sort_by<I, E>(mut self, expressions: I) -> Self
+    where
+        I: IntoIterator<Item = E>,
+        E: IntoExpr,
+    {
+        self.select.sort_by = Some(SortBy {
+            expressions: expressions
+                .into_iter()
+                .map(|e| {
+                    let expr = e.into_expr().0;
+                    match expr {
+                        Expression::Ordered(o) => *o,
+                        other => Ordered {
+                            this: other,
+                            desc: false,
+                            nulls_first: None,
+                            explicit_asc: false,
+                            with_fill: None,
+                        },
                     }
                 })
                 .collect(),
