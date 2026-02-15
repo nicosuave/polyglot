@@ -34,10 +34,6 @@ impl WasmExpr {
     pub(crate) fn inner(&self) -> &CoreExpr {
         &self.inner
     }
-
-    pub(crate) fn take(self) -> CoreExpr {
-        self.inner
-    }
 }
 
 #[wasm_bindgen]
