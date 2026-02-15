@@ -212,7 +212,7 @@ copy-bindings:
 
 # Build WASM package
 build-wasm:
-	cd crates/polyglot-sql-wasm && wasm-pack build --target web
+	cd crates/polyglot-sql-wasm && wasm-pack build --target bundler
 	cd packages/sdk && npm run build
 
 # Build everything

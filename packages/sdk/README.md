@@ -275,27 +275,47 @@ except(q1, q2).toSql();
 
 ## AST Visitor
 
-Walk and transform parsed AST nodes.
+Walk, search, and transform parsed AST nodes.
 
 ```typescript
-import { parse, Dialect, walk, transform, findAll, getColumns, renameColumns } from '@polyglot-sql/sdk';
+import {
+  parse, Dialect, walk, transform, findAll, findFirst, findByType,
+  getColumns, getColumnNames, getTableNames, renameColumns, renameTables,
+  addWhere, removeWhere, setLimit, setDistinct, qualifyColumns,
+  getAggregateFunctions, hasSubqueries, nodeCount,
+} from '@polyglot-sql/sdk';
 
 const { ast } = parse('SELECT a, b FROM t WHERE x > 1', Dialect.Generic);
 
-// Walk all nodes
-walk(ast, (node) => console.log(node));
-
-// Find all nodes matching a predicate
-const columns = getColumns(ast);
-
-// Transform AST nodes
-const transformed = transform(ast, (node) => {
-  // Return modified node or undefined to keep original
-  return node;
+// Walk all nodes with visitor callbacks
+walk(ast, {
+  enter: (node) => console.log('Entering:', node),
+  column: (node) => console.log('Found column:', node),
 });
 
-// Rename columns
+// Search for nodes
+const columns = getColumns(ast);
+const first = findFirst(ast, (node) => getExprType(node) === 'column');
+const selects = findByType(ast, 'select');
+
+// Get names as strings
+const colNames = getColumnNames(ast);   // ['a', 'b']
+const tableNames = getTableNames(ast);  // ['t']
+
+// Check for specific constructs
+const hasAggs = hasAggregates(ast);
+const hasSubs = hasSubqueries(ast);
+const count = nodeCount(ast);
+
+// Transform AST nodes
 const renamed = renameColumns(ast, { a: 'alpha', b: 'beta' });
+const renamedTables = renameTables(ast, { t: 'users' });
+const qualified = qualifyColumns(ast, 'users');
+
+// Modify query structure
+const withLimit = setLimit(ast, 100);
+const distinct = setDistinct(ast, true);
+const noWhere = removeWhere(ast);
 ```
 
 ## Validation
@@ -344,6 +364,66 @@ const result = validateWithSchema(
 // result.errors will contain an error for unknown_col
 ```
 
+## Column Lineage
+
+Trace how columns flow through SQL queries, from source tables to the result set.
+
+```typescript
+import { lineage, getSourceTables } from '@polyglot-sql/sdk';
+
+// Trace a column through joins, CTEs, and subqueries
+const result = lineage('total', 'SELECT o.total FROM orders o JOIN users u ON o.user_id = u.id');
+if (result.success) {
+  console.log(result.lineage.name);        // 'total'
+  console.log(result.lineage.downstream);  // source nodes
+}
+
+// Get all source tables that contribute to a column
+const tables = getSourceTables('total', 'SELECT o.total FROM orders o JOIN users u ON o.user_id = u.id');
+if (tables.success) {
+  console.log(tables.tables);  // ['orders']
+}
+```
+
+## SQL Diff
+
+Compare two SQL statements and get a list of edit operations using the ChangeDistiller algorithm.
+
+```typescript
+import { diff, hasChanges, changesOnly } from '@polyglot-sql/sdk';
+
+const result = diff(
+  'SELECT a, b FROM t WHERE x > 1',
+  'SELECT a, c FROM t WHERE x > 2',
+);
+
+if (result.success) {
+  console.log(hasChanges(result.edits));     // true
+  console.log(changesOnly(result.edits));    // only insert/remove/move/update edits
+
+  for (const edit of result.edits) {
+    // edit.type: 'insert' | 'remove' | 'move' | 'update' | 'keep'
+    console.log(edit.type, edit.source, edit.target);
+  }
+}
+```
+
+## Query Planner
+
+Convert a SQL query into an execution plan represented as a DAG of steps.
+
+```typescript
+import { plan } from '@polyglot-sql/sdk';
+
+const result = plan('SELECT dept, SUM(salary) FROM employees GROUP BY dept');
+if (result.success) {
+  const { root, leaves } = result.plan;
+  console.log(root.kind);       // 'aggregate'
+  console.log(leaves[0].kind);  // 'scan'
+  console.log(leaves[0].name);  // 'employees'
+}
+```
+
 ## Class-Based API
 
 For an object-oriented style, use the singleton `Polyglot` class:
@@ -370,6 +450,17 @@ const formatted = pg.format('SELECT a,b FROM t');
 | `validateWithSchema(sql, schema, dialect?, options?)` | Validate against a database schema |
 | `getDialects()` | List supported dialect names |
 | `getVersion()` | Get library version |
+
+### Analysis Functions
+
+| Function | Description |
+|----------|-------------|
+| `lineage(column, sql, dialect?, trimSelects?)` | Trace column lineage through a query |
+| `getSourceTables(column, sql, dialect?)` | Get source tables for a column |
+| `diff(source, target, dialect?, options?)` | Diff two SQL statements |
+| `hasChanges(edits)` | Check if diff has non-keep edits |
+| `changesOnly(edits)` | Filter to only change edits |
+| `plan(sql, dialect?)` | Build a query execution plan DAG |
 
 ### Expression Helpers
 
@@ -402,20 +493,57 @@ const formatted = pg.format('SELECT a,b FROM t');
 | `CaseBuilder` | `caseWhen()` / `caseOf(expr)` | CASE expressions |
 | `SetOpBuilder` | `union()` / `unionAll()` / `intersect()` / `except()` | Set operations |
 
-### AST Visitor
+### AST Walker
 
 | Function | Description |
 |----------|-------------|
-| `walk(node, callback)` | Walk all AST nodes |
+| `walk(node, visitor)` | Walk all AST nodes with visitor callbacks |
 | `findAll(node, predicate)` | Find nodes matching a predicate |
-| `transform(node, callback)` | Transform AST nodes |
+| `findByType(node, type)` | Find all nodes of a specific type |
+| `findFirst(node, predicate)` | Find the first matching node |
+| `some(node, predicate)` | Check if any node matches |
+| `every(node, predicate)` | Check if all nodes match |
+| `countNodes(node, predicate)` | Count nodes matching a predicate |
+| `getChildren(node)` | Get direct children of a node |
+| `getColumns(node)` | Get all column expression nodes |
+| `getTables(node)` | Get all table expression nodes |
+| `getIdentifiers(node)` | Get all identifier nodes |
+| `getFunctions(node)` | Get all function call nodes |
+| `getAggregateFunctions(node)` | Get all aggregate function nodes |
+| `getWindowFunctions(node)` | Get all window function nodes |
+| `getSubqueries(node)` | Get all subquery nodes |
+| `getLiterals(node)` | Get all literal nodes |
+| `getColumnNames(node)` | Get column names as strings |
+| `getTableNames(node)` | Get table names as strings |
+| `hasAggregates(node)` | Check for aggregate functions |
+| `hasWindowFunctions(node)` | Check for window functions |
+| `hasSubqueries(node)` | Check for subqueries |
+| `nodeCount(node)` | Total number of AST nodes |
+| `getDepth(node)` | Max depth of the AST tree |
+| `getParent(root, target)` | Find parent of a node |
+| `findAncestor(root, target, predicate)` | Find matching ancestor |
+| `getNodeDepth(root, target)` | Depth of a specific node |
+
+### AST Transformer
+
+| Function | Description |
+|----------|-------------|
+| `transform(node, config)` | Immutable tree transformation with callbacks |
+| `replaceNodes(node, predicate, replacement)` | Replace nodes matching a predicate |
+| `replaceByType(node, type, replacement)` | Replace nodes of a specific type |
 | `renameColumns(node, mapping)` | Rename columns in AST |
 | `renameTables(node, mapping)` | Rename tables in AST |
-| `getColumns(node)` | Get all column references |
-| `getTables(node)` | Get all table references |
 | `qualifyColumns(node, table)` | Add table qualifier to columns |
-| `addWhere(node, condition)` | Add WHERE clause |
+| `addWhere(node, condition, operator?)` | Add/extend WHERE clause (AND/OR) |
+| `removeWhere(node)` | Remove WHERE clause |
+| `addSelectColumns(node, ...columns)` | Add columns to SELECT |
+| `removeSelectColumns(node, predicate)` | Remove columns from SELECT |
+| `setLimit(node, limit)` | Set LIMIT clause |
+| `setOffset(node, offset)` | Set OFFSET clause |
+| `removeLimitOffset(node)` | Remove LIMIT and OFFSET |
+| `setDistinct(node, distinct?)` | Set SELECT DISTINCT |
 | `clone(node)` | Deep clone AST |
+| `remove(node, predicate)` | Remove nodes matching a predicate |
 
 ## Supported Dialects
 

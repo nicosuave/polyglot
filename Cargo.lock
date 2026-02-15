@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "polyglot-sql"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "criterion",
  "once_cell",
@@ -408,7 +408,7 @@ dependencies = [
 
 [[package]]
 name = "polyglot-sql-wasm"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "console_error_panic_hook",
  "js-sys",
